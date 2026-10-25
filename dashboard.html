@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="ru">
+
+<head>
+    <meta charset="utf-8">
+    <title>SmartFarm Video Analytics</title>
+    <style>
+        body {
+            font: 16px Arial, sans-serif;
+            background: #f4f7f5;
+            color: #183329;
+        }
+
+        main {
+            max-width: 1100px;
+            margin: 40px auto;
+            padding: 0 20px;
+        }
+
+        section {
+            background: white;
+            padding: 24px;
+            margin: 20px 0;
+            border-radius: 12px;
+        }
+
+        form {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 14px;
+            align-items: end;
+        }
+
+        label {
+            display: grid;
+            gap: 6px;
+        }
+
+        input,
+        select,
+        button {
+            padding: 9px;
+            font: inherit;
+        }
+
+        button {
+            background: #176b4d;
+            color: white;
+            border: 0;
+            cursor: pointer;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th,
+        td {
+            padding: 10px;
+            border-bottom: 1px solid #ddd;
+            text-align: left;
+        }
+
+        a {
+            color: #176b4d;
+        }
+
+        .actions {
+            white-space: nowrap;
+        }
+
+        .actions a,
+        .actions button {
+            display: inline-block;
+            margin-right: 8px;
+            padding: 6px 10px;
+            border: 1px solid #cde0d5;
+            border-radius: 6px;
+            background: #f0f7f3;
+            color: #176b4d;
+            text-decoration: none;
+            font: inherit;
+            font-size: 14px;
+            line-height: 20px;
+            vertical-align: middle;
+        }
+
+        .actions a:hover,
+        .actions button:hover {
+            background: #dcece3;
+        }
+    </style>
+</head>
+
+<body>
+    <main>
+        <h1>SmartFarm Video Analytics</h1>
+
+        <section>
+            <h2>Новый анализ</h2>
+            <form id="run-form">
+                <label>Видео
+                    <select id="filename" required></select>
+                </label>
+                <label>Модель
+                    <select id="weights">
+                        <option value="base">Базовая YOLO</option>
+                        <option value="v2">Дообученная v2</option>
+                        <option value="v3">Дообученная v3</option>
+                    </select>
+                </label>
+                <label>Кадров
+                    <input id="max-frames" type="number" value="302" min="1" max="10000">
+                </label>
+                <button type="submit">Запустить</button>
+            </form>
+            <p id="message"></p>
+        </section>
+
+        <section>
+            <h2>Запуски</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Видео</th>
+                        <th>Модель</th>
+                        <th>Статус</th>
+                        <th>Пересечений</th>
+                        <th>Создан</th>
+                        <th>Результат</th>
+                    </tr>
+                </thead>
+                <tbody id="runs"></tbody>
+            </table>
+        </section>
+        <section>
+            <h2 id="events-title">События запуска</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID коровы</th>
+                        <th>Кадр</th>
+                        <th>Время, с</th>
+                        <th>Направление</th>
+                    </tr>
+                </thead>
+                <tbody id="event-rows"></tbody>
+            </table>
+        </section>
+    </main>
+
+    <script>
+        const form = document.getElementById("run-form");
+        const message = document.getElementById("message");
+
+        async function loadSources() {
+            const response = await fetch("/sources");
+            const data = await response.json();
+            const select = document.getElementById("filename");
+
+            for (const filename of data.files) {
+                select.add(new Option(filename, filename));
+            }
+        }
+
+        function addCell(row, value) {
+            const cell = document.createElement("td");
+            cell.textContent = value;
+            row.appendChild(cell);
+        }
+
+        async function showEvents(runId) {
+            const response = await fetch(`/runs/${runId}/events`);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+
+            const events = await response.json();
+            document.getElementById("events-title").textContent =
+                `События запуска ${runId} (${events.length})`;
+
+            const body = document.getElementById("event-rows");
+            body.replaceChildren();
+
+            for (const event of events) {
+                const row = document.createElement("tr");
+                addCell(row, event.track_id);
+                addCell(row, event.frame_number);
+                addCell(row, event.time_seconds.toFixed(2));
+                addCell(row, event.direction);
+                body.appendChild(row);
+            }
+        }
+
+        async function loadRuns() {
+            const response = await fetch("/runs");
+            const runs = await response.json();
+            const body = document.getElementById("runs");
+            body.replaceChildren();
+
+            for (const run of runs) {
+                const row = document.createElement("tr");
+                addCell(row, run.source_name);
+                addCell(row, run.weights);
+                addCell(row, run.status);
+                addCell(row, run.total_crossings);
+                addCell(row, new Date(run.created_at).toLocaleString("ru-RU"));
+
+                const links = document.createElement("td");
+                links.className = "actions";
+                const details = document.createElement("a");
+                details.href = `/runs/${run.id}`;
+                details.textContent = "Детали";
+                links.appendChild(details);
+
+                if (run.status === "completed") {
+                    const eventsButton = document.createElement("button");
+                    eventsButton.type = "button";
+                    eventsButton.textContent = "События";
+                    eventsButton.addEventListener("click", () => {
+                        showEvents(run.id).catch(error => {
+                            message.textContent = `Ошибка событий: ${error}`;
+                        });
+                    });
+                    links.appendChild(eventsButton);
+
+                    const video = document.createElement("a");
+                    video.href = `/runs/${run.id}/video`;
+                    video.download = `${run.id}.mp4`;
+                    video.textContent = "Скачать видео";
+                    links.appendChild(video);
+                }
+
+                row.appendChild(links);
+                body.appendChild(row);
+            }
+        }
+
+        form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const button = form.querySelector("button");
+            button.disabled = true;
+
+            try {
+                const request = {
+                    filename: document.getElementById("filename").value,
+                    weights: document.getElementById("weights").value,
+                    max_frames: Number(document.getElementById("max-frames").value)
+                };
+                const response = await fetch("/runs", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(request)
+                });
+                const result = await response.json();
+                if (!response.ok) throw new Error(JSON.stringify(result));
+
+                message.textContent = `Запуск ${result.id} создан`;
+                await loadRuns();
+            } catch (error) {
+                message.textContent = `Ошибка: ${error}`;
+            } finally {
+                button.disabled = false;
+            }
+        });
+
+        loadSources().catch(error => message.textContent = `Ошибка видео: ${error}`);
+        loadRuns().catch(error => message.textContent = `Ошибка запусков: ${error}`);
+        setInterval(() => loadRuns().catch(console.error), 3000);
+    </script>
+</body>
+
+</html>

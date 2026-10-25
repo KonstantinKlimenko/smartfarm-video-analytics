@@ -1,0 +1,24 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: smartfarm
+      POSTGRES_USER: smartfarm
+      POSTGRES_PASSWORD: ${SMARTFARM_DB_PASSWORD:?Set password in .env}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - smartfarm_pgdata:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+  rtsp:
+    image: bluenviron/mediamtx:1-ffmpeg
+    environment:
+      MTX_RTSPTRANSPORTS: tcp
+    ports:
+      - "127.0.0.1:8554:8554"
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml:ro
+      - ./data/mixkit-cows-walking-trough-a-road-7429-hd-ready.mp4:/video/cows.mp4:ro
+
+volumes:
+  smartfarm_pgdata:

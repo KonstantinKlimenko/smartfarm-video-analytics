@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.venv/
+.vendor/
+outputs/
+data/*
+!data/.gitkeep
+models/
+.env
+yolo11n.pt
